@@ -34,6 +34,10 @@ class RequestForm(StatesGroup):
     extra = State()
     confirm = State()
 
+class SupportForm(StatesGroup):
+    request_number = State()
+    description = State()
+
 def main_menu(user_id: int = None):
     buttons = [
         [InlineKeyboardButton(text="Создать заявку", callback_data="create_request")],
