@@ -444,32 +444,28 @@ async def send_request(callback: CallbackQuery, state: FSMContext):
 
     success, error = await send_to_grok(payload)
 
+    bal = await get_balance(user_id)
     if success:
-        bal = await get_balance(user_id)
         await callback.message.answer(
             f"Заявка №{request_id} принята в работу.\nРезультат придёт в этот чат.\nТекущий баланс: {bal} заявок.",
             reply_markup=main_menu(user_id)
         )
     else:
-        # Возвращаем баланс, если списывали
-        if not is_admin_request:
-            await add_balance(user_id, 1)
+        # Принимаем заявку в любом случае, но уведомляем админа
         await callback.message.answer(
-            "Сейчас наблюдаются технические неполадки. Мы уже работаем над их устранением.\n"
-            "Попробуйте отправить заявку позже.",
+            f"Заявка №{request_id} принята.\nРезультат придёт в этот чат.\nТекущий баланс: {bal} заявок.",
             reply_markup=main_menu(user_id)
         )
-        # Уведомляем админа
         for admin_id in ADMIN_IDS:
             try:
                 await bot.send_message(
                     admin_id,
-                    f"Ошибка отправки заявки №{request_id} от {user_id} (@{callback.from_user.username})\n"
-                    f"Причина: {error}"
+                    f"Заявка №{request_id} от {user_id} (@{callback.from_user.username}) принята, "
+                    f"но webhook недоступен.\nПричина: {error}\n\nДанные сохранены в базе."
                 )
             except Exception:
                 pass
-        await set_request_status(request_id, "error")
+        await set_request_status(request_id, "webhook_failed")
 
     await state.clear()
     await callback.answer()
