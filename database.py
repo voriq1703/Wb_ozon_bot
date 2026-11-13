@@ -1,4 +1,5 @@
 import aiosqlite
+import json
 from config import DB_PATH
 
 async def init_db():
@@ -26,6 +27,23 @@ async def init_db():
                 user_id INTEGER,
                 data TEXT,
                 status TEXT DEFAULT 'new',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS drafts (
+                user_id INTEGER PRIMARY KEY,
+                data TEXT,
+                state TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS support_tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                request_number TEXT,
+                description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -105,16 +123,23 @@ async def set_balance(user_id: int, amount: int):
         )
         await db.commit()
 
+async def get_user_info(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT balance, created_at FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            return await cursor.fetchone()
+
+async def get_users_with_balance():
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT user_id, balance FROM users WHERE balance > 0 ORDER BY balance DESC"
+        ) as cursor:
+            return await cursor.fetchall()
+
 async def save_draft(user_id: int, data: dict, state: str):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS drafts (
-                user_id INTEGER PRIMARY KEY,
-                data TEXT,
-                state TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
         await db.execute(
             "INSERT OR REPLACE INTO drafts (user_id, data, state) VALUES (?, ?, ?)",
             (user_id, json.dumps(data, ensure_ascii=False), state)
@@ -131,45 +156,39 @@ async def load_draft(user_id: int):
                 return json.loads(row[0]), row[1]
             return None, None
 
-async def save_support_ticket(user_id: int, request_number: str, description: str) -> int:
+async def delete_draft(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS support_tickets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                request_number TEXT,
-                description TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cursor = await db.execute(
-            "INSERT INTO support_tickets (user_id, request_number, description) VALUES (?, ?, ?)",
-            (user_id, request_number, description)
-        )
+        await db.execute("DELETE FROM drafts WHERE user_id = ?", (user_id,))
         await db.commit()
-        return cursor.lastrowid
+
+async def cleanup_old_drafts(days: int = 7):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "DELETE FROM drafts WHERE updated_at < datetime('now', ?)",
             (f'-{days} days',)
         )
         await db.commit()
+
+async def save_support_ticket(user_id: int, request_number: str, description: str) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM drafts WHERE user_id = ?", (user_id,))
+        cursor = await db.execute(
+            "INSERT INTO support_tickets (user_id, request_number, description) VALUES (?, ?, ?)",
+            (user_id, request_number, description)
+        )
         await db.commit()
+        return cursor.lastrowid
+
+async def get_stuck_requests(hours: int = 24):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT user_id, balance FROM users WHERE balance > 0 ORDER BY balance DESC"
+            """SELECT id, user_id FROM requests 
+               WHERE status = 'new' AND created_at < datetime('now', ?)""",
+            (f'-{hours} hours',)
         ) as cursor:
             return await cursor.fetchall()
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT balance, created_at FROM users WHERE user_id = ?",
-            (user_id,)
-        ) as cursor:
-            return await cursor.fetchone()
 
 async def deduct_balance(user_id: int, amount: int = 1) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             if not row or row[0] < amount:
@@ -180,12 +199,3 @@ async def deduct_balance(user_id: int, amount: int = 1) -> bool:
         )
         await db.commit()
         return True
-
-async def get_stuck_requests(hours: int = 24):
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            """SELECT id, user_id FROM requests 
-               WHERE status = 'new' AND created_at < datetime('now', ?)""",
-            (f'-{hours} hours',)
-        ) as cursor:
-            return await cursor.fetchall()
