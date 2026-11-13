@@ -453,7 +453,10 @@ async def send_request(callback: CallbackQuery, state: FSMContext):
     else:
         # Принимаем заявку в любом случае, но уведомляем админа
         await callback.message.answer(
-            f"Заявка №{request_id} принята.\nРезультат придёт в этот чат.\nТекущий баланс: {bal} заявок.",
+            f"Заявка №{request_id} принята.\n\n"
+            "Сейчас наблюдаются небольшие технические неполадки, над которыми уже ведутся работы.\n"
+            "Как только заявка будет взята в работу — вам придёт уведомление в этот чат.\n\n"
+            f"Текущий баланс: {bal} заявок.",
             reply_markup=main_menu(user_id)
         )
         for admin_id in ADMIN_IDS:
